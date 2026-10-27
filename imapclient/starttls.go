@@ -55,7 +55,9 @@ func (c *Client) upgradeStartTLS(startTLS *startTLSCommand) {
 	}
 
 	tlsConn := tls.Client(cleartextConn, startTLS.tlsConfig)
-	rw := c.options.wrapReadWriter(tlsConn)
+	// Reuse the same tracer across the upgrade: the trace continues with
+	// decrypted frames, while the TLS handshake bypasses the wrapper.
+	rw := c.tracer.Wrap(tlsConn)
 
 	c.br.Reset(rw)
 	// Unfortunately we can't re-use the bufio.Writer here, it races with

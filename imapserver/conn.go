@@ -38,6 +38,7 @@ type Conn struct {
 	server   *Server
 	br       *bufio.Reader
 	bw       *bufio.Writer
+	tracer   *imapwire.DebugTracer
 	encMutex sync.Mutex
 
 	mutex   sync.Mutex
@@ -49,7 +50,8 @@ type Conn struct {
 }
 
 func newConn(c net.Conn, server *Server) *Conn {
-	rw := server.options.wrapReadWriter(c)
+	tracer := imapwire.NewDebugTracer(server.options.DebugWriter, imapwire.ConnSideServer)
+	rw := tracer.Wrap(c)
 	br := bufio.NewReader(rw)
 	bw := bufio.NewWriter(rw)
 	return &Conn{
@@ -57,6 +59,7 @@ func newConn(c net.Conn, server *Server) *Conn {
 		server:  server,
 		br:      br,
 		bw:      bw,
+		tracer:  tracer,
 		enabled: make(imap.CapSet),
 	}
 }

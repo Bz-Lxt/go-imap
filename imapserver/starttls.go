@@ -66,7 +66,9 @@ func (c *Conn) handleStartTLS(tag string, dec *imapwire.Decoder) error {
 	c.conn = tlsConn
 	c.mutex.Unlock()
 
-	rw := c.server.options.wrapReadWriter(tlsConn)
+	// Reuse the same tracer across the upgrade: the trace continues with
+	// decrypted frames, while the TLS handshake bypasses the wrapper.
+	rw := c.tracer.Wrap(tlsConn)
 	c.br.Reset(rw)
 	c.bw.Reset(rw)
 

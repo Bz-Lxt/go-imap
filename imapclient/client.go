@@ -67,9 +67,19 @@ type Options struct {
 	// TLS configuration for use by DialTLS and DialStartTLS. If nil, the
 	// default configuration is used.
 	TLSConfig *tls.Config
-	// Raw ingress and egress data will be written to this writer, if any.
-	// Note, this may include sensitive information such as credentials used
-	// during authentication.
+	// DebugWriter, if non-nil, receives a best-effort, sanitized trace of
+	// the IMAP frames exchanged by the client. Frames are reassembled
+	// despite network fragmentation, each written on a single line and
+	// prefixed with its direction: "C: " for sent commands and "S: " for
+	// received responses, so concurrent sends and receives don't get
+	// interleaved.
+	//
+	// Sensitive data is never written: literal payloads (including message
+	// contents) are replaced by their declared length ("{N}"), LOGIN
+	// arguments and SASL initial responses/challenges/responses are
+	// redacted. Tracing stays active across STARTTLS upgrades and only
+	// decrypted frames are recorded. Errors returned by the writer are
+	// ignored, so tracing cannot corrupt or terminate the connection.
 	DebugWriter io.Writer
 	// Unilateral data handler.
 	UnilateralDataHandler *UnilateralDataHandler
@@ -78,19 +88,6 @@ type Options struct {
 	// Dialer to use when establishing connections with the Dial* functions.
 	// If nil, a default dialer with a 30 second timeout is used.
 	Dialer *net.Dialer
-}
-
-func (options *Options) wrapReadWriter(rw io.ReadWriter) io.ReadWriter {
-	if options.DebugWriter == nil {
-		return rw
-	}
-	return struct {
-		io.Reader
-		io.Writer
-	}{
-		Reader: io.TeeReader(rw, options.DebugWriter),
-		Writer: io.MultiWriter(rw, options.DebugWriter),
-	}
 }
 
 func (options *Options) decodeText(s string) (string, error) {
@@ -145,6 +142,7 @@ type Client struct {
 	br       *bufio.Reader
 	bw       *bufio.Writer
 	dec      *imapwire.Decoder
+	tracer   *imapwire.DebugTracer
 	encMutex sync.Mutex
 
 	greetingCh   chan struct{}
@@ -176,7 +174,8 @@ func New(conn net.Conn, options *Options) *Client {
 		options = &Options{}
 	}
 
-	rw := options.wrapReadWriter(conn)
+	tracer := imapwire.NewDebugTracer(options.DebugWriter, imapwire.ConnSideClient)
+	rw := tracer.Wrap(conn)
 	br := bufio.NewReader(rw)
 	bw := bufio.NewWriter(rw)
 
@@ -186,6 +185,7 @@ func New(conn net.Conn, options *Options) *Client {
 		br:         br,
 		bw:         bw,
 		dec:        imapwire.NewDecoder(br, imapwire.ConnSideClient),
+		tracer:     tracer,
 		greetingCh: make(chan struct{}),
 		decCh:      make(chan struct{}),
 		state:      imap.ConnStateNone,

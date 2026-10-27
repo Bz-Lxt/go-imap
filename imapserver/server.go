@@ -49,23 +49,20 @@ type Options struct {
 	// InsecureAuth allows clients to authenticate without TLS. In this mode,
 	// the server is susceptible to man-in-the-middle attacks.
 	InsecureAuth bool
-	// Raw ingress and egress data will be written to this writer, if any.
-	// Note, this may include sensitive information such as credentials used
-	// during authentication.
+	// DebugWriter, if non-nil, receives a best-effort, sanitized trace of
+	// the IMAP frames exchanged on each connection. Frames are reassembled
+	// despite network fragmentation, each written on a single line and
+	// prefixed with its direction: "C: " for received commands and "S: "
+	// for sent responses, so concurrent sends and receives don't get
+	// interleaved.
+	//
+	// Sensitive data is never written: literal payloads (including message
+	// contents) are replaced by their declared length ("{N}"), LOGIN
+	// arguments and SASL initial responses/challenges/responses are
+	// redacted. Tracing stays active across STARTTLS upgrades and only
+	// decrypted frames are recorded. Errors returned by the writer are
+	// ignored, so tracing cannot corrupt or terminate the connection.
 	DebugWriter io.Writer
-}
-
-func (options *Options) wrapReadWriter(rw io.ReadWriter) io.ReadWriter {
-	if options.DebugWriter == nil {
-		return rw
-	}
-	return struct {
-		io.Reader
-		io.Writer
-	}{
-		Reader: io.TeeReader(rw, options.DebugWriter),
-		Writer: io.MultiWriter(rw, options.DebugWriter),
-	}
 }
 
 func (options *Options) caps() imap.CapSet {
