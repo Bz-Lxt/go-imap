@@ -52,7 +52,24 @@ type Options struct {
 	// Raw ingress and egress data will be written to this writer, if any.
 	// Note, this may include sensitive information such as credentials used
 	// during authentication.
+	//
+	// For a secure, redacted and frame-oriented view of the protocol, use
+	// Tracer instead.
 	DebugWriter io.Writer
+	// Tracer is an optional secure protocol tracer.
+	//
+	// Unlike DebugWriter, the tracer reassembles complete protocol frames,
+	// even when the data is fragmented by the network or sent and received
+	// concurrently: it keeps command tags and literal sizes visible, but
+	// redacts LOGIN credentials, SASL exchanges and message contents.
+	//
+	// The tracer keeps working across a STARTTLS upgrade and never observes
+	// the TLS handshake. It is passive and does not affect the connection.
+	//
+	// A new tracer is created for each connection. Tracer.Trace is called
+	// from the connection's goroutines; the implementation must be safe for
+	// concurrent use and must not block.
+	Tracer imap.Tracer
 }
 
 func (options *Options) wrapReadWriter(rw io.ReadWriter) io.ReadWriter {

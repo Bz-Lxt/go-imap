@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/internal/imaptrace"
 	"github.com/emersion/go-imap/v2/internal/imapwire"
 )
 
@@ -38,6 +39,7 @@ type Conn struct {
 	server   *Server
 	br       *bufio.Reader
 	bw       *bufio.Writer
+	tracer   *imaptrace.Tracer
 	encMutex sync.Mutex
 
 	mutex   sync.Mutex
@@ -49,7 +51,15 @@ type Conn struct {
 }
 
 func newConn(c net.Conn, server *Server) *Conn {
+	var tracer *imaptrace.Tracer
+	if server.options.Tracer != nil {
+		tracer = imaptrace.New(server.options.Tracer, imapwire.ConnSideServer)
+	}
+
 	rw := server.options.wrapReadWriter(c)
+	if tracer != nil {
+		rw = tracer.Wrap(rw)
+	}
 	br := bufio.NewReader(rw)
 	bw := bufio.NewWriter(rw)
 	return &Conn{
@@ -57,6 +67,7 @@ func newConn(c net.Conn, server *Server) *Conn {
 		server:  server,
 		br:      br,
 		bw:      bw,
+		tracer:  tracer,
 		enabled: make(imap.CapSet),
 	}
 }

@@ -35,6 +35,7 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/internal"
+	"github.com/emersion/go-imap/v2/internal/imaptrace"
 	"github.com/emersion/go-imap/v2/internal/imapwire"
 )
 
@@ -70,7 +71,23 @@ type Options struct {
 	// Raw ingress and egress data will be written to this writer, if any.
 	// Note, this may include sensitive information such as credentials used
 	// during authentication.
+	//
+	// For a secure, redacted and frame-oriented view of the protocol, use
+	// Tracer instead.
 	DebugWriter io.Writer
+	// Tracer is an optional secure protocol tracer.
+	//
+	// Unlike DebugWriter, the tracer reassembles complete protocol frames,
+	// even when the data is fragmented by the network or sent and received
+	// concurrently: it keeps command tags and literal sizes visible, but
+	// redacts LOGIN credentials, SASL exchanges and message contents.
+	//
+	// The tracer keeps working across a STARTTLS upgrade and never observes
+	// the TLS handshake. It is passive and does not affect the connection.
+	//
+	// Tracer.Trace is called from the client's goroutines; the implementation
+	// must be safe for concurrent use and must not block.
+	Tracer imap.Tracer
 	// Unilateral data handler.
 	UnilateralDataHandler *UnilateralDataHandler
 	// Decoder for RFC 2047 words.
@@ -145,6 +162,7 @@ type Client struct {
 	br       *bufio.Reader
 	bw       *bufio.Writer
 	dec      *imapwire.Decoder
+	tracer   *imaptrace.Tracer
 	encMutex sync.Mutex
 
 	greetingCh   chan struct{}
@@ -176,7 +194,15 @@ func New(conn net.Conn, options *Options) *Client {
 		options = &Options{}
 	}
 
+	var tracer *imaptrace.Tracer
+	if options.Tracer != nil {
+		tracer = imaptrace.New(options.Tracer, imapwire.ConnSideClient)
+	}
+
 	rw := options.wrapReadWriter(conn)
+	if tracer != nil {
+		rw = tracer.Wrap(rw)
+	}
 	br := bufio.NewReader(rw)
 	bw := bufio.NewWriter(rw)
 
@@ -186,6 +212,7 @@ func New(conn net.Conn, options *Options) *Client {
 		br:         br,
 		bw:         bw,
 		dec:        imapwire.NewDecoder(br, imapwire.ConnSideClient),
+		tracer:     tracer,
 		greetingCh: make(chan struct{}),
 		decCh:      make(chan struct{}),
 		state:      imap.ConnStateNone,

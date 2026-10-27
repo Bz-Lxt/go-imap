@@ -66,7 +66,14 @@ func (c *Conn) handleStartTLS(tag string, dec *imapwire.Decoder) error {
 	c.conn = tlsConn
 	c.mutex.Unlock()
 
+	// The TLS handshake performs I/O directly on cleartextConn (which wraps
+	// the raw, untapped connection), so the tracer only sees decrypted
+	// post-negotiation frames.
 	rw := c.server.options.wrapReadWriter(tlsConn)
+	if c.tracer != nil {
+		c.tracer.Reset()
+		rw = c.tracer.Wrap(rw)
+	}
 	c.br.Reset(rw)
 	c.bw.Reset(rw)
 
